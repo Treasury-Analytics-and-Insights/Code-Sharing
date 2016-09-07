@@ -1,0 +1,400 @@
+%macro creating_clean_sch_enrol;
+
+data student_enrol;
+	set moe.student_enrol;
+	format startdate enddate ExtractionDate date9.;
+	startdate=input(compress(moe_esi_start_date,"-"),yymmdd10.);
+	enddate=input(compress(moe_esi_end_date,"-"),yymmdd10.);
+	ExtractionDate=input(compress(moe_esi_extrtn_date,"-"),yymmdd10.);
+	schoolnumber=moe_esi_provider_code*1;
+run;
+
+proc sql;
+	create table sch_enrol_clean
+		as select distinct 
+			a.snz_uid
+			,a.snz_moe_uid
+			,a.startdate
+			,a.enddate
+			,a.schoolnumber
+			,a.ExtractionDate
+			,b.DOB
+			,year(b.DOB)+19 as year19_birth
+
+		from student_enrol a inner join &population b
+		on a.snz_uid=b.snz_uid
+				order by snz_uid;
+quit;
+
+
+data sch_enrol_clean; set sch_enrol_clean;
+if enddate=. and ExtractionDate>intnx('YEAR',DOB,19,'S') then enddate=MDY(12,31,year19_birth); 
+else if enddate=. then	enddate=ExtractionDate;
+
+if enddate>startdate;
+
+if startdate>0;
+
+if startdate>"&sensor"d then
+		delete;
+
+if enddate>"&sensor"d then
+		enddate="&sensor"d;
+drop year19_birth;
+run;
+
+proc sort data=sch_enrol_clean nodupkey;
+	by snz_uid startdate enddate schoolnumber;
+run;
+
+proc sort data=sch_enrol_clean;
+	by snz_uid startdate enddate;
+run;
+%mend;
+
+proc format;
+	value $lv8id
+		"40","41","46", "60", "96", "98"      ="Level 1-3 certificates"
+		"36"-"37","43"                        ="Level 4 Certificates"
+		"30"-"35"                       ="Certificates and Diploma Level 5-7"
+		"20","21","25"                       ="Bachelor degrees"
+		"12"-"14"                       ="Honours, postgrad dipl"
+		"11"                            ="Masters degrees"
+		"01","10"                       ="Doctoral degrees"
+		"90", "97", "99"                ="Non formal programmes"
+		Other                           ="Error";
+run;
+
+proc format;
+	value $subsector
+		"1","3"="Universities"
+		"2"="Polytechnics"
+		"4"="Wananga"
+		"5","6"="Private Training Establishments";
+run;
+
+proc format;
+value $field
+'01'='Natural and Physical Sciences'
+'02'='Information Technology'
+'03'='Engineering and Related Technologies'
+'04'='Agriculture and Building'
+'05'='Agriculture, Environmental and Related Studies'
+'06'='Health'
+'07'='Education'
+'08'='Management and Commerce'
+'09'='Society and Culture'
+'10'='Creative Arts'
+'11'='Food, Hospitality and PErsonal Services'
+'12'='Mixed Field Programme';
+run;
+
+%macro creating_ter_enrol_table;
+proc sql;
+	create table enrol as
+
+	SELECT distinct 
+		snz_uid
+		,moe_enr_year_nbr
+		,moe_enr_prog_start_date
+		,moe_enr_prog_end_date
+		,sum(moe_enr_efts_consumed_nbr) as EFTS_consumed
+		,moe_enr_efts_prog_years_nbr as EFTS_prog_yrs
+		,moe_enr_qacc_code as qacc
+		,moe_enr_qual_code as Qual
+		,moe_enr_prog_nzsced_code as NZSCED
+		,moe_enr_funding_srce_code as fund_source
+		,moe_enr_subsector_code as subsector format $subsector.
+		,moe_enr_qual_level_code as level
+		,moe_enr_qual_type_code as qual_type
+		,moe_enr_is_domestic_ind
+		,moe_enr_residency_status_code
+		,moe_enr_provider_code 
+	FROM moe.enrolment 
+		WHERE snz_uid IN 
+
+		(SELECT DISTINCT snz_uid FROM &population) and moe_enr_year_nbr>=&first_anal_yr and moe_enr_year_nbr<=&last_anal_yr 
+		group by snz_uid,moe_enr_prog_start_date,moe_enr_prog_end_date, qual, NZSCED
+			order by snz_uid;
+quit;
+
+proc sql;
+create table enrol_1 as
+select a.*,
+b.DOB
+from enrol a right join &population b
+on a.snz_uid=b.snz_uid;
+quit;
+
+data Ter_enrol_clean;
+	set enrol_1;
+	format startdate enddate ddmmyy10.;
+	startdate = input(compress(moe_enr_prog_start_date,"-"),yymmdd10.);
+	enddate = input(compress(moe_enr_prog_end_date,"-"),yymmdd10.);
+
+	if EFTS_consumed>0;
+	dur=enddate-startdate;
+
+	if dur>0;
+	start_year=year(startdate);
+
+	if start_year>=&first_anal_yr and start_year<=&last_anal_yr;
+
+	if startdate>="&sensor"d then
+		delete;
+
+	if enddate>"&sensor"d then
+		enddate="&sensor"d;
+Formal=0; 
+if fund_source not in ('05','06','07','08','11','24') and qual_type="D" then Formal=1; 
+run;
+%mend;
+
+data it deletes;
+	set moe.tec_it_learner;
+
+if moe_itl_programme_type_code in ("NC","TC");
+
+format startdate enddate date9.;
+	startdate=input(compress(moe_itl_start_date,"-"),yymmdd10.);
+
+	if moe_itl_end_date ne '' then
+		enddate=input(compress(moe_itl_end_date,"-"),yymmdd10.);
+
+	if moe_itl_end_date='' then
+		enddate="&sensor"d;
+
+	if startdate>"&sensor"d then
+		output deletes;
+
+	if enddate>"&sensor"d then
+		enddate="&sensor"d;
+
+	if startdate>enddate then
+		output deletes;
+	else output it;
+run;
+
+proc sql;
+	create table itl_enrol as 
+		SELECT distinct
+			a.*,
+			b.DOB
+
+		FROM IT a inner join &population b
+		on a.snz_uid=b.snz_uid
+		ORDER by snz_uid;
+quit;
+
+proc sort data=itl_enrol nodupkey out=itl_enrol_clean(keep=snz_uid DOB startdate enddate moe_itl_sum_units_consumed_nbr); by snz_uid startdate enddate DOB; run;
+%mend;
+
+%macro creating_clean_qual_table;
+
+Proc format;
+value HA 
+42='National Diploma at level 4 or above'
+41='National Certificate at level 4 or above'
+40='New Zealand Scholarship award'
+39='NCEA level 3 (with Excellence)'
+38='NCEA level 3 (with Merit)'
+37='NCEA level 3 (with Achieve)'
+36='NCEA level 3 (No Endorsement)'
+35='Other NQF Qualification at level 3'
+29='NCEA level 2 (with Excellence)'
+28='NCEA level 2 (with Merit)'
+27='NCEA level 2 (with Achieve)'
+26='NCEA level 2 (No Endorsement)'
+25='Other NQF Qualification at level 2'
+19='NCEA level 1 (with Excellence)'
+18='NCEA level 1 (with Merit)'
+17='NCEA level 1 (with Achievement)'
+16='NCEA level 1 (No Endorsement)'
+15='Other NQF Qualification at level 1';
+
+value HA_grouped
+42,41,40='Level 4 Qualification or above'
+39,38,37,36='NCEA level 3 Qualification'
+35='Other NQF Qualification at level 3'
+29,28,27,26='NCEA level 2 Qualification'
+25='Other NQF Qualification at level 2'
+19,18,17,16='NCEA level 1 Qualification'
+15='Other NQF Qualification at level 1';
+
+Value ha_grp
+42,41,40,39,38,37,36,35='NCEA level 3 or above'
+29,28,27,26,25='Level 2 Qualification'
+19,18,17,16,15='NCEA level 1 Qualification'
+0,.='No Formal NCEA Attainment';
+
+run;
+
+data student_qual; 
+set moe.student_qualification;
+	format nzqaloadeddate1 date9.;
+	qual=moe_sql_qual_code;
+	result=moe_sql_exam_result_code;
+	awardingschool=moe_sql_award_provider_code;
+	level=moe_sql_nqf_level_code;
+	year=moe_sql_attained_year_nbr;
+	end_year=moe_sql_endorsed_year_nbr;
+	nzqaloadeddate1=input(compress(moe_sql_nzqa_load_date,"-"),yymmdd10.);
+load_year=year(nzqaloadeddate1);
+run;
+
+proc sql;
+create table sec_qual as
+select distinct
+      a.*
+      ,b.DOB
+from student_qual a right join &population b
+on a.snz_uid=b.snz_uid
+order by snz_uid, year;
+quit;
+%mend;
+
+%macro creating_clean_interv_table; 
+data STUDENTINTERVENTIONS;
+	set moe.student_interventions;
+	format startdate enddate extractiondate date9.;
+	startdate=input(compress(moe_inv_start_date,"-"),yymmdd10.);
+	enddate=input(compress(moe_inv_end_date,"-"),yymmdd10.);
+	extractiondate=input(compress(moe_inv_extrtn_date,"-"),yymmdd10.);
+	InterventionID=moe_inv_intrvtn_code*1;
+
+	if enddate='31Dec9999'd then
+		enddate=Extractiondate;
+
+	if enddate=. then
+		enddate=ExtractionDate;
+
+	if enddate>=startdate;
+
+	if startdate>"&sensor"d then
+		delete;
+
+	if enddate>"&sensor"d then
+		enddate="&sensor"d;
+run;
+
+
+proc format;
+	value interv_grp
+		5='ESOL'
+		6,17='AlTED'
+		7='SUSP'
+		8='STAND'
+		9,32='TRUA'
+		12,26,29,24,25,27,28,30='SEDU'
+		10='EARLEX'
+		11='HOMESCH'
+		13,14='BOARD'
+		16,31='OTHINT';
+run;
+
+proc sql;
+	create table interventions as select 
+		b.snz_uid
+		,b.DOB
+		,a.InterventionID as interv
+		,a.startdate
+		,a.enddate
+		,put(a.InterventionID,interv_grp.) as interv_grp	  	 
+	from STUDENTINTERVENTIONS a inner join &population b 
+		on a.snz_uid=b.snz_uid
+	order by b.snz_uid;
+quit;
+%mend;
+
+%macro create_clean_Ter_compl;
+proc format;
+	value $lv8id
+		"40","41","46", "60", "96", "98"      ="1"
+		"36"-"37","43"                        ="2"
+		"30"-"35"                       ="3"
+		"20","21","25"                       ="4"
+		"12"-"14"                       ="6"
+		"11"                            ="7"
+		"01","10"                       ="8"
+		"90", "97", "99"                ="9"
+		Other                           ="E";
+run;
+
+proc sql;
+	create table TER_compl as
+		select  
+			a.snz_uid,
+			a.moe_com_year_nbr,
+			put(a.moe_com_qacc_code,$lv8id.) as att_TER_qual_type,
+			a.moe_com_qual_level_code as level,
+			a.moe_com_qual_nzsced_code,
+			b.DOB
+		from moe.completion a inner join &population b
+on a.snz_uid=b.snz_uid
+where MDY(12,31,moe_com_year_nbr)<="&sensor"d;
+quit;
+%mend;
+
+%macro create_ITL_qual_clean;
+data it deletes;
+	set moe.tec_it_learner;
+
+if moe_itl_programme_type_code in ("NC","TC");
+
+format startdate enddate date9.;
+	startdate=input(compress(moe_itl_start_date,"-"),yymmdd10.);
+
+	if moe_itl_end_date ne '' then
+		enddate=input(compress(moe_itl_end_date,"-"),yymmdd10.);
+
+	if moe_itl_end_date='' then
+		enddate="&sensor"d;
+
+	if startdate>"&sensor"d then
+		output deletes;
+
+	if enddate>"&sensor"d then
+		enddate="&sensor"d;
+
+	if startdate>enddate then
+		output deletes;
+	else output it;
+run;
+
+proc sql;
+	create table it_qual as 
+		SELECT distinct
+			a.snz_uid
+			,a.moe_itl_year_nbr as year 
+			,a.startdate 
+			,a.enddate
+			,a.moe_itl_level1_qual_awarded_nbr as L1
+			,a.moe_itl_level2_qual_awarded_nbr as L2
+			,a.moe_itl_level3_qual_awarded_nbr as L3
+			,a.moe_itl_level4_qual_awarded_nbr as L4
+			,a.moe_itl_level5_qual_awarded_nbr as L5
+			,a.moe_itl_level6_qual_awarded_nbr as L6
+			,a.moe_itl_level7_qual_awarded_nbr as L7
+			,a.moe_itl_level8_qual_awarded_nbr as L8
+			,b.DOB
+		FROM IT a inner join &population b
+		on a.snz_uid=b.snz_uid
+				ORDER by snz_uid, year,startdate;
+quit;
+
+data itl1 deletes;
+	set it_qual;
+	array L(*) L1-L8;
+
+	if sum(of L1-L8)=0 then
+		output deletes;
+	else output itl1;
+run;
+
+proc sql;
+	create table itl_quals_clean
+		as select distinct * from itl1;
+quit;
+%mend;
+
+
