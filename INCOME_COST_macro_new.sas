@@ -212,6 +212,8 @@ proc sql;
 	from sei_summary a left join sandmaa.TSY_b15_04_cpi_index b
 		on a.mid_yy=b.year and a.mid_qq=b.quarter;
 quit;
+proc datasets lib=work;
+delete sei_summary job_summary ; run;
 
 * COMBINE ALL THE SOURCES OF INCOME BY CALENDAR YEAR;
 ************************************;
@@ -247,6 +249,9 @@ do ind=&firstage. to &lastage.;
 			%inc_age(PPL);
 			%inc_age(STU);
 end;
+run;
+proc datasets  lib=work;
+delete SEI_summary1 job_summary1;
 run;
 
 proc summary data=FACT_INC_ nway;

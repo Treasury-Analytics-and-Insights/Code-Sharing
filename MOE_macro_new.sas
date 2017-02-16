@@ -725,7 +725,7 @@ proc sql;
 			,a.snz_moe_uid
 			,input(compress(a.moe_esi_start_date,"-"),yymmdd10.) format date9. as startdate
 			,input(compress(a.moe_esi_end_date,"-"),yymmdd10.) format date9. as enddate
-			,input(a.moe_esi_provider_code,3.) as schoolnumber
+			,input(a.moe_esi_provider_code,10.) as schoolnumber
 			,input(compress(a.moe_esi_extrtn_date,"-"),yymmdd10.) format date9.  as ExtractionDate
 			,b.DOB
 			,year(b.DOB)+19 as year19_birth
@@ -813,4 +813,317 @@ proc datasets lib=work;
 delete sch_enrol_sum sch_enrol sch_enrol_OR;
 run;
 
+%mend;
+
+
+
+***********************************************************************************************************************************
+***********************************************************************************************************************************
+Macro to create monthly arrays
+***********************************************************************************************************************************
+***********************************************************************************************************************************;
+%macro Create_mth_Sch_enrol_pop;
+proc sql;
+	create table sch_enrol
+		as select distinct 
+			a.snz_uid
+			,a.snz_moe_uid
+			,input(compress(a.moe_esi_start_date,"-"),yymmdd10.) format date9. as startdate
+			,input(compress(a.moe_esi_end_date,"-"),yymmdd10.) format date9. as enddate
+			,input(a.moe_esi_provider_code,10.) as schoolnumber
+			,input(compress(a.moe_esi_extrtn_date,"-"),yymmdd10.) format date9.  as ExtractionDate
+			,b.DOB
+			,year(b.DOB)+19 as year19_birth,
+			case when moe_esi_end_date='  ' then 1 else 0 end as sch_enddate_imputed
+
+		from moe.student_enrol a inner join &population b
+		on a.snz_uid=b.snz_uid
+				order by snz_uid;
+quit;
+
+
+data sch_enrol; set sch_enrol;
+* imputing enddates for those who are over 19;
+if enddate=. and ExtractionDate>intnx('YEAR',DOB,19,'S') then enddate=MDY(12,31,year19_birth); 
+else if enddate=. then	enddate=ExtractionDate;
+if enddate>startdate;
+	* cleaning for errorness records JL;
+if startdate>0;
+if startdate>"&sensor"d then
+		delete;
+if enddate>"&sensor"d then
+		enddate="&sensor"d;
+drop year19_birth;
+run;
+
+* lets make sure no duplicate records of enrolments;
+proc sort data=sch_enrol nodupkey;
+	by snz_uid startdate enddate schoolnumber;
+run;
+
+proc sort data=sch_enrol;
+	by snz_uid startdate enddate;
+run;
+
+%OVERLAP (sch_enrol);
+
+**CODE FOR SCHOOL ENROLMENT MONTHS;
+
+data sch_enrol_OR  ;
+set sch_enrol_OR;
+format start_window end_window date9.;
+array sch_enr_id_(*) sch_enr_id_&m.-sch_enr_id_&n.; * end of jun2015;
+array sch_enr_da_(*) sch_enr_da_&m.-sch_enr_da_&n.; * end of jun2015;
+
+do ind=&m. to &n.; i=ind-&m.+1;
+	sch_enr_id_(i)=0;
+	sch_enr_da_(i)=0;
+* overwriting start and end window as interval equal to one month;
+
+start_window=intnx('month',&start.,i-1,'S');
+end_window=(intnx('month',&start.,i,'S'))-1;
+
+if not((startdate > end_window) or (enddate < start_window)) then do;
+	sch_enr_id_(i)=1; * creating inidcator of school enrolment;
+	* measuring the days enrolled;
+				if (startdate <= start_window) and  (enddate > end_window) then
+					days=(end_window-start_window)+1;
+				else if (startdate <= start_window) and  (enddate <= end_window) then
+					days=(enddate-start_window)+1;
+				else if (startdate > start_window) and  (enddate <= end_window) then
+					days=(enddate-startdate)+1;
+				else if (startdate > start_window) and  (enddate > end_window) then
+					days=(end_window-startdate)+1;
+				sch_enr_da_[i]=days*sch_enr_id_(i);
+
+end;
+end;
+run;
+
+
+proc means data=sch_enrol_OR  ;
+run;
+
+proc summary data=sch_enrol_OR nway;
+class snz_uid ;
+var sch_enr_id_&m.-sch_enr_id_&n.  sch_enr_da_&m.-sch_enr_da_&n. sch_enddate_imputed;
+output out=&projectlib.._mth_sch_enr_&date.(drop=_:) sum=;
+run;
+
+proc datasets lib=work;
+delete sch_enrol sch_enrol_OR deletes ;
+run;
+
+%mend;
+
+
+********************************************************************************************************************************;
+********************************************************************************************************************************;
+**Tertiary enrolment monthly vectors;
+**Now using formal programmes only for this vector ;
+********************************************************************************************************************************;
+********************************************************************************************************************************;
+
+%macro Create_mth_Ter_enrol_pop;
+
+%* FORMATING, CLEANING AND SENSORING;
+proc sql;
+	create table ter_enrol as
+
+	SELECT distinct 
+		a.snz_uid
+		,a.moe_enr_year_nbr
+		,input(compress(a.moe_enr_prog_start_date,"-"),yymmdd10.) format date9. as startdate
+		,input(compress(a.moe_enr_prog_end_date,"-"),yymmdd10.) format date9.  as enddate
+		,year(input(compress(a.moe_enr_prog_start_date,"-"),yymmdd10.)) as start_year		
+		,sum(a.moe_enr_efts_consumed_nbr) as EFTS_consumed
+		,a.moe_enr_efts_prog_years_nbr as EFTS_prog_yrs
+		,a.moe_enr_qacc_code as qacc
+		,a.moe_enr_qual_code as Qual
+		,a.moe_enr_prog_nzsced_code as NZSCED
+		,(case when a.moe_enr_funding_srce_code in ('05','06','07','08','11','24') and a.moe_enr_qual_type_code="D" then 1 else 0 end) as Formal
+		,a.moe_enr_subsector_code as subsector format $subsector.
+		,a.moe_enr_qual_level_code as level
+/*		,a.moe_enr_qual_type_code as qual_type*/
+		,a.moe_enr_is_domestic_ind
+		,a.moe_enr_residency_status_code
+		,a.moe_enr_provider_code
+		,b.DOB
+	FROM moe.enrolment a inner join &population b
+	on a.snz_uid=b.snz_uid
+		WHERE a.moe_enr_year_nbr>=&first_anal_yr and a.moe_enr_year_nbr<=&last_anal_yr
+			order by snz_uid;
+quit;
+
+data ter_enrol; set ter_enrol;
+if EFTS_consumed>0;
+if enddate-startdate>0;
+if start_year>=&first_anal_yr and start_year<=&last_anal_yr;
+if enddate>"&sensor"d then enddate="&sensor"d;
+if startdate>="&sensor"d then delete;
+if formal=1;
+run;
+
+%overlap(ter_enrol);
+
+data TER_ENROL_MON_temp; 
+set ter_enrol_OR ;
+format start_window end_window date9.;
+array ter_enr_id_(*) ter_enr_id_&m.-ter_enr_id_&n.; 
+array ter_enr_da_(*) ter_enr_da_&m.-ter_enr_da_&n.; 
+do ind=&m. to &n.; i=ind-&m.+1;
+	ter_enr_id_(i)=0;
+	ter_enr_da_(i)=0;
+
+	start_window=intnx('month',&start.,i-1,'S');
+   end_window=(intnx('month',&start.,i,'S'))-1;
+
+	if not((startdate > end_window) or (enddate < start_window)) then do;
+		ter_enr_id_(i)=1; * creating inidcator of school enrolment;
+		* measuring the days enrolled;
+					if (startdate <= start_window) and  (enddate > end_window) then
+						days=(end_window-start_window)+1;
+					else if (startdate <= start_window) and  (enddate <= end_window) then
+						days=(enddate-start_window)+1;
+					else if (startdate > start_window) and  (enddate <= end_window) then
+						days=(enddate-startdate)+1;
+					else if (startdate > start_window) and  (enddate > end_window) then
+						days=(end_window-startdate)+1;
+					ter_enr_da_[i]=days*ter_enr_id_(i);
+	end;
+end;
+run;
+
+proc summary data=TER_ENROL_MON_temp nway;
+class snz_uid ;
+var ter_enr_id_&m.-ter_enr_id_&n.  ter_enr_da_&m.-ter_enr_da_&n.; 
+output out=mth_ter_enrol(drop=_:) sum=;
+run;
+
+data &projectlib.._mth_ter_enr_&date.;
+set mth_ter_enrol;
+array ter_enr_id_(*) ter_enr_id_&m.-ter_enr_id_&n.; 
+do ind=&m. to &n.; i=ind-&m.+1;
+   if ter_enr_id_[i]>1 then ter_enr_id_[i]=1;
+   end;
+drop ind i;
+run;
+
+proc datasets lib=work;
+delete mth_ter_enrol TER_ENROL_MON_temp ter_enrol: ;
+%mend;
+
+********************************************************************************************************************************;
+********************************************************************************************************************************;
+**Industry training monthly activity;
+**Pick up temp dataset from the code that created IT quals, above;
+********************************************************************************************************************************;
+********************************************************************************************************************************;
+**Industry training qualifications;
+
+%macro Create_mth_IT_MA_enrol_pop;
+* FORMATING, SENSORING AND CLEANING;
+proc sql;
+create table IT as select
+a.snz_uid,
+input(compress(moe_itl_start_date,"-"),yymmdd10.) format date9. as startdate,
+input(compress(moe_itl_end_date,"-"),yymmdd10.) format date9. as enddate,
+a.moe_itl_programme_type_code,
+a.moe_itl_sum_units_consumed_nbr,
+a.moe_itl_fund_code,
+year(input(compress(moe_itl_start_date,"-"),yymmdd10.)) as year,
+b.DOB
+from moe.tec_it_learner a inner join &population b
+on a.snz_uid=b.snz_uid
+where moe_itl_programme_type_code in ("NC","TC");
+
+data ITL MA; Set IT;
+if enddate=. then enddate="&sensor"d;
+if startdate>"&sensor"d then delete;
+if enddate>"&sensor"d then enddate="&sensor"d;
+if startdate>enddate then delete;
+if year>=2003;
+if moe_itl_fund_code='IT' then output ITL;
+if moe_itl_fund_code='MA' then output MA;
+run;
+
+proc sort data=ITL(keep=snz_uid DOB startdate enddate moe_itl_fund_code) nodupkey ; 
+by snz_uid startdate enddate ; 
+proc sort data=MA (keep=snz_uid DOB startdate enddate moe_itl_fund_code) nodupkey; 
+by snz_uid startdate enddate ; run;
+
+%overlap(ITL);
+%overlap(MA);
+
+data ITL_OR; set ITL_OR;
+format start_window end_window date9.;
+array it_id_(*) it_id_&m.-it_id_&n.; 
+array it_da_(*)  it_da_&m.-it_da_&n.; 
+
+do ind=&m. to &n.; i=ind-&m.+1;
+	it_id_(i)=0;
+	it_da_(i)=0;
+	
+start_window=intnx('month',&start.,i-1,'S');
+end_window=(intnx('month',&start.,i,'S'))-1;
+
+if not((startdate > end_window) or (enddate < start_window)) then do;
+    it_id_(i)=1;
+	* measuring the days overseas;
+				if (startdate <= start_window) and  (enddate > end_window) then
+					days=(end_window-start_window)+1;
+				else if (startdate <= start_window) and  (enddate <= end_window) then
+					days=(enddate-start_window)+1;
+				else if (startdate > start_window) and  (enddate <= end_window) then
+					days=(enddate-startdate)+1;
+				else if (startdate > start_window) and  (enddate > end_window) then
+					days=(end_window-startdate)+1;
+				it_da_[i]=days*it_id_(i);				
+	end;
+end;
+run;
+
+data MA_OR; set MA_OR;
+format start_window end_window date9.;
+array ma_id_(*) ma_id_&m.-ma_id_&n.; 
+array ma_da_(*)  ma_da_&m.-ma_da_&n.; 
+
+do ind=&m. to &n.; i=ind-&m.+1;
+	ma_id_(i)=0;
+	ma_da_(i)=0;
+	
+	start_window=intnx("month",&start.,i-1,"beginning"); * start is beg of the month;
+	end_window=intnx("month",&start.,i-1,"end");* end is end of the month;
+
+if not((startdate > end_window) or (enddate < start_window)) then do;
+    ma_id_(i)=1;
+	* measuring the days overseas;
+				if (startdate <= start_window) and  (enddate > end_window) then
+					days=(end_window-start_window)+1;
+				else if (startdate <= start_window) and  (enddate <= end_window) then
+					days=(enddate-start_window)+1;
+				else if (startdate > start_window) and  (enddate <= end_window) then
+					days=(enddate-startdate)+1;
+				else if (startdate > start_window) and  (enddate > end_window) then
+					days=(end_window-startdate)+1;
+				ma_da_[i]=days*ma_id_(i);				
+	end;
+end;
+run;
+
+proc summary data=MA_OR nway;
+class snz_uid DOB;
+var MA_:;
+output out=TEMP1(drop=_:) sum=;
+
+proc summary data=ITL_OR nway;
+class snz_uid DOB;
+var IT_:;
+output out=TEMP2(drop=_:) sum=;
+
+Data &projectlib.._mth_IT_MA_ENR_&date; merge TEMP1 TEMP2; by snz_uid; run;
+
+proc datasets lib=work;
+delete TEMP1 TEMP2 Deletes IT MA IT_OR MA_OR ITL:;
+run;
 %mend;

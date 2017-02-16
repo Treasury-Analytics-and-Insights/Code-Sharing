@@ -48,7 +48,7 @@ proc sql;
 			cyf_intake_clean t
 			on
 			s.sibling = t.snz_uid
-		order by s.ref_snz_uid, t.event_Start_Date;
+		order by s.ref_snz_uid, t.startdate;
 run;
 
 proc sql;
@@ -74,7 +74,7 @@ proc sql;
 			cyf_place_clean t
 			on
 			s.sibling = t.snz_uid
-		order by s.ref_snz_uid, t.event_Start_Date;
+		order by s.ref_snz_uid, t.startdate;
 run;
 
 proc sql;
@@ -87,25 +87,25 @@ proc sql;
 			cyf_care_e_clean t
 			on
 			s.sibling = t.snz_uid
-		order by s.ref_snz_uid, t.event_Start_Date;
+		order by s.ref_snz_uid, t.startdate;
 run;
 
 data TEMP_cyf_n1;
 	set TEMP_cyf_n1;
 
-	if event_End_Date>=intnx('YEAR',startdate,-5,'sameday');
-	if event_start_Date<intnx('YEAR',startdate,-5,'sameday') 
-	and event_End_Date>intnx('YEAR',startdate,-5,'sameday') then
-	event_start_Date=intnx('YEAR',startdate,-5,'sameday');
+	if enddate>=intnx('YEAR',startdate,-5,'sameday');
+	if startdate<intnx('YEAR',startdate,-5,'sameday') 
+	and enddate>intnx('YEAR',startdate,-5,'sameday') then
+	startdate=intnx('YEAR',startdate,-5,'sameday');
 
 run;
 
 data TEMP_cyf_p1;
 	set TEMP_cyf_p1;
-	if event_End_Date>=intnx('YEAR',startdate,-5,'sameday');
-	if event_start_Date<intnx('YEAR',startdate,-5,'sameday')
-		and event_End_Date>intnx('YEAR',startdate,-5,'sameday') then
-		event_start_Date=intnx('YEAR',startdate,-5,'sameday');
+	if enddate>=intnx('YEAR',startdate,-5,'sameday');
+	if startdate<intnx('YEAR',startdate,-5,'sameday')
+		and enddate>intnx('YEAR',startdate,-5,'sameday') then
+		startdate=intnx('YEAR',startdate,-5,'sameday');
 run;
 
 data TEMP_cyf_a1;
@@ -115,10 +115,10 @@ run;
 
 data TEMP_cyf_ce1;
 	set TEMP_cyf_ce1;
-	if event_End_Date>=intnx('YEAR',startdate,-5,'sameday');
-	if event_start_Date<intnx('YEAR',startdate,-5,'sameday')
-		and event_End_Date>intnx('YEAR',startdate,-5,'sameday') then
-		event_start_Date=intnx('YEAR',startdate,-5,'sameday');
+	if enddate>=intnx('YEAR',startdate,-5,'sameday');
+	if startdate<intnx('YEAR',startdate,-5,'sameday')
+		and enddate>intnx('YEAR',startdate,-5,'sameday') then
+		startdate=intnx('YEAR',startdate,-5,'sameday');
 run;
 
 proc sort data=TEMP_CYF_n1;
@@ -204,6 +204,7 @@ data  TEMP_cyf_ce2;
 	by ref_snz_uid ;
 	array othchd_CYF_ce_at_age_(*) othchd_CYF_ce_at_age_&firstage.-othchd_CYF_ce_at_age_&cyf_lastage.;
 	array othchd_YJ_ce_at_age_(*) othchd_YJ_ce_at_age_&firstage.-othchd_YJ_ce_at_age_&cyf_lastage.; 
+	event_duration=enddate-startdate+1;
 	retain othchd:;
 
 	%Care_episodes(ref_snz_uid,dob,-99,0,othchd,at_birth);
@@ -292,6 +293,7 @@ run;
 data  TEMP_CYF_ce3;
 	set  TEMP_CYF_ce1;
 	by ref_snz_uid ;
+	event_duration=enddate-startdate+1;
 	array othchd_CYF_ce_(*) othchd_CYF_ce_&cyf_left_yr. -othchd_CYF_ce_&last_anal_yr.;
 	array othchd_YJ_ce_(*) othchd_YJ_ce_&cyf_left_yr. -othchd_YJ_ce_&last_anal_yr.;
 	retain othchd:;

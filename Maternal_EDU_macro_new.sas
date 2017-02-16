@@ -3,7 +3,7 @@
 * Part 1 ;
 data TEMP_mother;
 set &projectlib..PARENTTOCHILDMAP_&date.;
-if parent_sex='2' and source="&rel.";
+if parent_sex='2' and (source="&rel." or source1="&rel.");
 run;
 
 * Part 2 ;

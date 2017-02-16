@@ -332,8 +332,109 @@ array any_mh_at_age_(*) any_mh_at_age_&firstage-any_mh_at_age_&lastage;
 		end;
 	end;
 
-		do ind=&firstage. to &lastage.;
+		do ind=&first_anal_yr. to &last_anal_yr.;
+		i=ind-(&first_anal_yr.-1);
+			subs_use_(i)=0;
+			oth_mh_(i)=0;
+			any_mh_(i)=0;
+
+		start_window=intnx('YEAR',MDY(1,1,&first_anal_yr.),i-1,'S');
+		end_window=intnx('YEAR',MDY(1,1,&first_anal_yr.),i,'S');
+
+		if ((date < end_window) and (date >= start_window)) then do;
+			if indicator = 'Substance_use' then subs_use_(i) = 1;
+			if indicator not in ('Substance_use') then oth_mh_(i) = 1;
+			any_mh_(i) = 1;
+		end;
+	end;
+run;
+
+proc summary data=TEMP_ALL nway;
+	class snz_uid DOB;
+	var subs_use_at_age_&firstage.-subs_use_at_age_&lastage.
+		oth_mh_at_age_&firstage.-oth_mh_at_age_&lastage.
+		any_mh_at_age_&firstage.-any_mh_at_age_&lastage.;
+	output out=&projectlib.._ind_mhealth_at_age_&date (drop=_type_ _freq_) max=;
+run;
+
+proc summary data=TEMP_ALL nway;
+	class snz_uid DOB;
+	var subs_use_&first_anal_yr.-subs_use_&last_anal_yr.
+		oth_mh_&first_anal_yr.-oth_mh_&last_anal_yr.
+		any_mh_&first_anal_yr.-any_mh_&last_anal_yr.;
+	output out=&projectlib.._ind_mhealth_&date (drop=_type_ _freq_) max=;
+run;
+
+proc datasets lib=work;
+delete temp:;
+run;
+%mend;
+
+
+******;
+%Macro Create_MH_PRIM_ind_pop;
+*PRIMHD;
+proc sql;
+	create table TEMP_prmhd as
+	select 
+		 a.snz_uid
+		,a.DOB
+		,input(compress(b.moh_mhd_activity_start_date,"-"),yymmdd8.) format date9. as date
+		,b.moh_mhd_activity_type_code as activity_type_code
+		,b.moh_mhd_team_code as team_code
+		,c.team_type
+		,(case when activity_type_code in ('T09') then 'Psychotic' 
+when (activity_type_code in ('T16','T17','T18','T19','T20') or b.moh_mhd_team_code in ('03','10','11','21','23')) then 'Substance_use'
+when b.moh_mhd_team_code = '16' then 'Eating disorder'
+when activity_type_code not in ('T09','T16','T17','T18','T19','T20') then 'Any_MH_disorder' end ) as indicator format $20.
+	from &population a 
+		inner join MOH.PRIMHD b
+			on a.snz_uid = b.snz_uid
+		left join sandmoh2.moh_PRIMHD_team_lookup c
+			on b.moh_mhd_team_code=c.team_code
+	where a.snz_uid>0
+	order by snz_uid
+	;
+quit;
+
+
+* Combine;
+
+data TEMP_all;
+   length indicator $20;
+   set 
+
+       TEMP_prmhd         (keep=snz_uid DOB date indicator);
+run;
+
+
+data TEMP_ALL;
+set TEMP_ALL;
+array subs_use_ (*) subs_use_&first_anal_yr-subs_use_&last_anal_yr;
+array oth_mh_ (*) oth_mh_&first_anal_yr-oth_mh_&last_anal_yr;
+array any_mh_ (*) any_mh_&first_anal_yr-any_mh_&last_anal_yr;
+
+array subs_use_at_age_(*) subs_use_at_age_&firstage-subs_use_at_age_&lastage;
+array oth_mh_at_age_(*) oth_mh_at_age_&firstage-oth_mh_at_age_&lastage;
+array any_mh_at_age_(*) any_mh_at_age_&firstage-any_mh_at_age_&lastage;
+
+	do ind=&firstage. to &lastage.;
 		i=ind-(&firstage.-1);
+
+		start_window=intnx('YEAR',DOB,i-1,'S');
+		end_window=intnx('YEAR',DOB,i,'S');
+			subs_use_at_age_(i)=0;
+			oth_mh_at_age_(i)=0;
+			any_mh_at_age_(i)=0;
+		if ((date < end_window) and (date >= start_window)) then do;
+			if indicator = 'Substance_use' then subs_use_at_age_(i) = 1;
+			if indicator not in ('Substance_use') then oth_mh_at_age_(i) = 1;
+			any_mh_at_age_(i) = 1;
+		end;
+	end;
+
+		do ind=&first_anal_yr. to &last_anal_yr.;
+		i=ind-(&first_anal_yr.-1);
 			subs_use_(i)=0;
 			oth_mh_(i)=0;
 			any_mh_(i)=0;
@@ -354,7 +455,7 @@ proc summary data=TEMP_ALL nway;
 	var subs_use_at_age_&firstage-subs_use_at_age_&lastage
 		oth_mh_at_age_&firstage-oth_mh_at_age_&lastage
 		any_mh_at_age_&firstage-any_mh_at_age_&lastage;
-	output out=&projectlib.._ind_mhealth_at_age_&date (drop=_type_ _freq_) max=;
+	output out=&projectlib.._ind_mh_prim_at_age_&date (drop=_type_ _freq_) max=;
 run;
 
 proc summary data=TEMP_ALL nway;
@@ -362,7 +463,7 @@ proc summary data=TEMP_ALL nway;
 	var subs_use_&first_anal_yr.-subs_use_&last_anal_yr.
 		oth_mh_&first_anal_yr.-oth_mh_&last_anal_yr.
 		any_mh_&first_anal_yr.-any_mh_&last_anal_yr.;
-	output out=&projectlib.._ind_mhealth_&date (drop=_type_ _freq_) max=;
+	output out=&projectlib.._ind_mh_prim_&date (drop=_type_ _freq_) max=;
 run;
 
 proc datasets lib=work;
