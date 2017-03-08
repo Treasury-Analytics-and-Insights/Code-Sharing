@@ -649,8 +649,8 @@ drop supp_:;
 
 %macro adult_bentype_age(bentype);
  
-array supp_&bentype._at_age_[*] supp_&bentype._at_age_16-supp_&bentype._at_age_&lastage. ;
-array da_&bentype._at_age_[*] da_&bentype._at_age_16-da_&bentype._at_age_&lastage.;
+array supp_&bentype._at_age_[*] supp_&bentype._at_age_&firstage.-supp_&bentype._at_age_&lastage. ;
+array da_&bentype._at_age_[*] da_&bentype._at_age_&firstage.-da_&bentype._at_age_&lastage.;
 
 	supp_&bentype._at_age_(age)=0;
 	da_&bentype._at_age_(age)=0;
@@ -710,7 +710,7 @@ set MSD_spell_OR_pop;
 		start1=MDY(1,1,&msd_left_yr.); format start1 date9.;
 
 array total_da_onben_(*) total_da_onben_&msd_left_yr.-total_da_onben_&last_anal_yr;
-array total_da_onben_at_age_(*) total_da_onben_at_age_16-total_da_onben_at_age_&lastage.;
+array total_da_onben_at_age_(*) total_da_onben_at_age_&firstage.-total_da_onben_at_age_&lastage.;
 
 
 do ind=&msd_left_yr. to &last_anal_yr;
@@ -740,8 +740,8 @@ total_da_onben_(i)=sum(of da_DPB_(i),da_IB_(i),da_UB_(i),da_IYB_(i),da_SB_(i),da
 
 end;
 
-do i=16 to &lastage.;
-			age=i-15;
+do i=&firstage. to &lastage.;
+			age=i-(&firstage.-1);
 			start_window=intnx('YEAR',DOB,age-1,'S');
 			end_window=intnx('YEAR',DOB,age,'S')-1;
 			%adult_bentype_age(DPB);
